@@ -14,7 +14,9 @@ exports.getCourses = asyncHandler(async (req, res, next) => {
 // @route   GET /api/courses/:id
 // @access  Public
 exports.getCourse = asyncHandler(async (req, res, next) => {
-  const course = await Course.findById(req.params.id);
+  const course = await Course.findById(req.params.id)
+    .populate('authors', 'profile.firstName profile.lastName profile.title profile.avatar')
+    .populate('createdBy', 'profile.firstName profile.lastName');
 
   if (!course) {
     return next(new ErrorResponse(`Course not found with id of ${req.params.id}`, 404));
@@ -30,16 +32,27 @@ exports.getCourse = asyncHandler(async (req, res, next) => {
 // @route   POST /api/courses
 // @access  Private
 exports.createCourse = asyncHandler(async (req, res, next) => {
+  // Validate required fields
+  const { name, code, description, category, level, thumbnail } = req.body;
+  
+  if (!name || !code || !description || !category || !level || !thumbnail) {
+    return next(new ErrorResponse('Please provide all required fields', 400));
+  }
+  
   // Add user to req.body
   req.body.createdBy = req.user.id;
 
-  // Check for published course
-  const publishedCourse = await Course.findOne({ name: req.body.name, status: 'published' });
+  // Add user as an author by default if authors not specified
+  if (!req.body.authors || req.body.authors.length === 0) {
+    req.body.authors = [req.user.id];
+  }
 
-  // If the user is not an admin, they can only add one published course with same name
-  if (publishedCourse && req.user.roles.indexOf('admin') === -1) {
+  // Check for course with same code
+  const existingCourse = await Course.findOne({ code: req.body.code });
+
+  if (existingCourse) {
     return next(
-      new ErrorResponse(`You have already published a course with name ${req.body.name}`, 400)
+      new ErrorResponse(`A course with code ${req.body.code} already exists`, 400)
     );
   }
 
@@ -69,6 +82,16 @@ exports.updateCourse = asyncHandler(async (req, res, next) => {
         401
       )
     );
+  }
+
+  // If updating code, check if new code already exists
+  if (req.body.code && req.body.code !== course.code) {
+    const codeExists = await Course.findOne({ code: req.body.code });
+    if (codeExists) {
+      return next(
+        new ErrorResponse(`A course with code ${req.body.code} already exists`, 400)
+      );
+    }
   }
 
   course = await Course.findByIdAndUpdate(req.params.id, req.body, {
@@ -102,6 +125,24 @@ exports.deleteCourse = asyncHandler(async (req, res, next) => {
     );
   }
 
+  // Check if there are enrollments for this course
+  const enrollmentsCount = await Enrollment.countDocuments({ courseId: req.params.id });
+  
+  if (enrollmentsCount > 0 && !req.query.force) {
+    return next(
+      new ErrorResponse(
+        `Cannot delete course with active enrollments. Use ?force=true to override.`,
+        400
+      )
+    );
+  }
+
+  // Delete associated resources (enrollments, assignments, submissions, etc.)
+  await Promise.all([
+    Enrollment.deleteMany({ courseId: req.params.id }),
+    // Add other cleanup operations here
+  ]);
+
   await course.deleteOne();
 
   res.status(200).json({
@@ -115,13 +156,21 @@ exports.deleteCourse = asyncHandler(async (req, res, next) => {
 // @access  Private
 exports.getEnrolledCourses = asyncHandler(async (req, res, next) => {
   const enrollments = await Enrollment.find({ userId: req.user.id })
-    .populate('courseId');
+    .populate({
+      path: 'courseId',
+      select: 'name code description thumbnail level category enrollmentCount rating createdBy',
+      populate: {
+        path: 'createdBy',
+        select: 'profile.firstName profile.lastName profile.avatar'
+      }
+    });
 
   const courses = enrollments.map(enrollment => ({
     ...enrollment.courseId._doc,
     progress: enrollment.progress,
     enrollmentStatus: enrollment.status,
-    enrollmentId: enrollment._id
+    enrollmentId: enrollment._id,
+    lastAccessedAt: enrollment.lastAccessedAt
   }));
 
   res.status(200).json({
@@ -141,6 +190,11 @@ exports.enrollCourse = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Course not found with id of ${req.params.id}`, 404));
   }
 
+  // Check if course is published
+  if (course.status !== 'published') {
+    return next(new ErrorResponse(`Cannot enroll in an unpublished course`, 400));
+  }
+
   // Check if already enrolled
   const existingEnrollment = await Enrollment.findOne({
     userId: req.user.id,
@@ -156,7 +210,9 @@ exports.enrollCourse = asyncHandler(async (req, res, next) => {
     userId: req.user.id,
     courseId: req.params.id,
     status: 'enrolled',
-    progress: 0
+    progress: 0,
+    enrollmentDate: Date.now(),
+    lastAccessedAt: Date.now()
   });
 
   // Increment enrollmentCount in the course

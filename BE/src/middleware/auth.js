@@ -63,3 +63,31 @@ exports.authorize = (...roles) => {
     next();
   };
 };
+
+// Middleware to check resource ownership
+exports.checkOwnership = (model) => async (req, res, next) => {
+  try {
+    const resource = await model.findById(req.params.id);
+    
+    if (!resource) {
+      return next(new ErrorResponse(`Resource not found with id ${req.params.id}`, 404));
+    }
+    
+    // Admin can access any resource
+    if (req.user.roles.includes('admin')) {
+      return next();
+    }
+    
+    // Check if user is the owner
+    const ownerField = resource.user || resource.createdBy || resource.userId;
+    if (ownerField && ownerField.toString() !== req.user.id) {
+      return next(
+        new ErrorResponse(`You do not have permission to access this resource`, 403)
+      );
+    }
+    
+    next();
+  } catch (err) {
+    next(err);
+  }
+};

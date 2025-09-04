@@ -19,7 +19,7 @@ const { cacheMiddleware } = require('./middleware/cache');
 
 // Import DB and Routes
 const connectDB = require('./config/db');
-const mainRouter = require('./routes/index.routes'); // Sử dụng file route chính
+const mainRouter = require('./routes/index.routes');
 const socketHandler = require('./utils/socket'); // Đường dẫn đúng
 
 // Load env vars
@@ -32,11 +32,11 @@ const app = express();
 const httpServer = createServer(app);
 
 // Body parser
-app.use(express.json({ limit: '10kb' })); // Giới hạn payload
+app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
 // Cookie parser
-app.use(cookieParser());
+app.use(cookieParser(process.env.COOKIE_SECRET || 'secret'));
 
 // Dev logging middleware
 if (process.env.NODE_ENV === 'development') {
@@ -44,7 +44,19 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "*.cloudinary.com"]
+    }
+  },
+  xssFilter: true,
+  noSniff: true,
+  referrerPolicy: { policy: 'same-origin' }
+}));
 app.use(xss());
 app.use(mongoSanitize());
 app.use(compression());
@@ -52,7 +64,9 @@ app.use(compression());
 // Enable CORS
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Apply general rate limiter to all API requests
@@ -66,8 +80,8 @@ app.use('/api/assignments/:assignmentId/submissions', submissionLimiter);
 // Set static folder
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Mount main router
-app.use('api', mainRouter); // Versioning API
+// Mount main router với /api thay vì /api/v1 để phù hợp với controllers
+app.use('/', mainRouter);
 
 // Health check endpoint
 app.get('/health', (req, res) => res.status(200).send('OK'));
@@ -95,6 +109,13 @@ io.on('connection', socketHandler(io));
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err, promise) => {
+  console.log(`Error: ${err.message}`.red);
+  // Close server & exit process
+  server.close(() => process.exit(1));
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
   console.log(`Error: ${err.message}`.red);
   // Close server & exit process
   server.close(() => process.exit(1));

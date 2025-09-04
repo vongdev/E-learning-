@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Assignment = require('../models/assignment.model');
 const Submission = require('../models/submission.model');
 const Course = require('../models/course.model');
@@ -31,6 +32,13 @@ exports.getAssignment = asyncHandler(async (req, res, next) => {
 // @route   POST /api/assignments
 // @access  Private/Instructor or Admin
 exports.createAssignment = asyncHandler(async (req, res, next) => {
+  const { title, description, courseId, dueDate } = req.body;
+  
+  // Validate required fields
+  if (!title || !description || !courseId || !dueDate) {
+    return next(new ErrorResponse('Please provide all required fields', 400));
+  }
+  
   // Add user to req.body
   req.body.createdBy = req.user.id;
 
@@ -110,6 +118,10 @@ exports.deleteAssignment = asyncHandler(async (req, res, next) => {
     );
   }
 
+  // Delete all associated submissions first
+  await Submission.deleteMany({ assignmentId: assignment._id });
+
+  // Then delete the assignment
   await assignment.deleteOne();
 
   res.status(200).json({
@@ -124,25 +136,48 @@ exports.deleteAssignment = asyncHandler(async (req, res, next) => {
 exports.getAssignmentsByCourse = asyncHandler(async (req, res, next) => {
   const { courseId } = req.params;
 
-  const assignments = await Assignment.find({ courseId });
+  // Check if courseId is valid
+  if (!mongoose.Types.ObjectId.isValid(courseId)) {
+    return next(new ErrorResponse(`Invalid course ID format`, 400));
+  }
 
-  // For each assignment, check if the user has submitted
-  const assignmentsWithStatus = await Promise.all(
-    assignments.map(async (assignment) => {
-      const submission = await Submission.findOne({
-        assignmentId: assignment._id,
-        userId: req.user.id
-      });
-
-      return {
-        ...assignment.toObject(),
-        submitted: !!submission,
-        submissionId: submission ? submission._id : null,
-        submissionStatus: submission ? submission.status : null,
-        score: submission && submission.grade ? submission.grade.score : null
-      };
-    })
-  );
+  // Use aggregation pipeline for better performance
+  const assignmentsWithStatus = await Assignment.aggregate([
+    { 
+      $match: { 
+        courseId: mongoose.Types.ObjectId.createFromHexString(courseId) 
+      } 
+    },
+    {
+      $lookup: {
+        from: 'submissions',
+        let: { assignmentId: '$_id', userId: mongoose.Types.ObjectId.createFromHexString(req.user.id) },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$assignmentId', '$$assignmentId'] },
+                  { $eq: ['$userId', '$$userId'] }
+                ]
+              }
+            }
+          },
+          { $project: { _id: 1, status: 1, 'grade.score': 1 } }
+        ],
+        as: 'submission'
+      }
+    },
+    {
+      $addFields: {
+        submitted: { $gt: [{ $size: '$submission' }, 0] },
+        submissionId: { $arrayElemAt: ['$submission._id', 0] },
+        submissionStatus: { $arrayElemAt: ['$submission.status', 0] },
+        score: { $arrayElemAt: ['$submission.grade.score', 0] }
+      }
+    },
+    { $project: { submission: 0 } }
+  ]);
 
   res.status(200).json({
     success: true,
