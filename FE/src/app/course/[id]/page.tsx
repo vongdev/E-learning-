@@ -1,106 +1,81 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { use } from "react" // Thêm import này
-import { MainClassroom } from "@/components/classroom/main-classroom"
-import { BreakoutRooms } from "@/components/classroom/breakout-rooms"
-import { Schedule } from "@/components/schedule/schedule"
-import { Assignments } from "@/components/assignments/assignments"
-import { AdminDashboard } from "@/components/admin/admin-dashboard"
-import { LoginForm } from "@/components/shared/login-form"
-import { UserHeader } from "@/components/shared/user-header"
+import { useParams, useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { GraduationCap, MessageSquare, CalendarDays, ClipboardList, Settings, ArrowLeft } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { courseAPI, progressAPI } from "@/service/api"
+import { UserHeader } from "@/components/shared/user-header"
+import { 
+  Tabs, 
+  TabsContent, 
+  TabsList, 
+  TabsTrigger 
+} from "@/components/ui/tabs"
+import { 
+  AlertCircle, 
+  BookOpen, 
+  Clock, 
+  FileText, 
+  Home, 
+  LayoutDashboard, 
+  Loader2, 
+  MessageSquare, 
+  Users
+} from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import Image from "next/image"
+import CourseSyllabus from "@/components/course/course-syllabus"
+import CourseResources from "@/components/course/course-resources"
+import CourseDiscussions from "@/components/course/course-discussions"
+import CourseAssignments from "@/components/course/course-assignments"
+import CourseStudents from "@/components/course/course-students"
 
-// Định nghĩa kiểu dữ liệu cho props
-interface CoursePageProps {
-  params: { id: string }
-}
-
-// Định nghĩa kiểu dữ liệu cho khóa học
-interface Course {
-  id: number
-  code: string
-  name: string
-  instructor: string
-  description: string
-}
-interface BreakoutRoomsProps {
-  userRole: "admin" | "student"
-  assignedRoomId: number | null
-  courseId: number
-}
-
-export default function CoursePage({ params }: CoursePageProps) {
-  const [activeTab, setActiveTab] = useState<string>("classroom")
-  const { user, isAdmin, isStudent } = useAuth()
+export default function CoursePage() {
+  const { id } = useParams()
   const router = useRouter()
-  const [courseData, setCourseData] = useState<Course | null>(null)
-  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const { user } = useAuth()
+  const [course, setCourse] = useState<any>(null)
+  const [progress, setProgress] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState("syllabus")
 
-  // Sửa lỗi params.id - unwrap bằng React.use()
-  const courseId = params.id
-
-  // Khi phát hiện là admin, tự động chuyển sang tab "admin"
   useEffect(() => {
-    if (isAdmin) setActiveTab("admin")
-  }, [isAdmin])
-
-  // Lấy dữ liệu khóa học
-  useEffect(() => {
-    if (!user) return
-
-    const fetchCourse = async () => {
-      try {
-        // Mô phỏng fetch API
-        setTimeout(() => {
-          // Mock data - trong thực tế sẽ là API call
-          if (parseInt(courseId) > 10) {
-            throw new Error("Khóa học không tồn tại")
-          }
-          
-          setCourseData({
-            id: parseInt(courseId),
-            code: parseInt(courseId) === 1 ? "MKT301" : `COURSE${courseId}`,
-            name: parseInt(courseId) === 1 ? "Nguyên lý Marketing" : `Khóa học ${courseId}`,
-            instructor: "TS. Nguyễn Văn Minh",
-            description: "Tìm hiểu về các nguyên lý cơ bản của marketing và cách áp dụng trong thực tế",
-          })
-          setIsLoading(false)
-        }, 800)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Đã xảy ra lỗi")
-        setIsLoading(false)
-      }
+    // Redirect if not logged in
+    if (!user) {
+      router.push("/")
+      return
     }
 
-    localStorage.setItem("currentCourseId", courseId)
-    fetchCourse()
-  }, [courseId, user])
+    fetchCourseData()
+  }, [id, user, router])
 
-  const userAssignedRoom = isStudent ? 1 : null
+  const fetchCourseData = async () => {
+    setIsLoading(true)
+    setError(null)
 
-  const handleJoinBreakout = () => {
-    setActiveTab("breakout")
+    try {
+      // Fetch course details
+      const courseResponse = await courseAPI.getCourseById(id as string)
+      setCourse(courseResponse.data.data)
+
+      // Fetch course progress
+      const progressResponse = await progressAPI.getCourseProgress(id as string)
+      setProgress(progressResponse.data.data)
+    } catch (err) {
+      console.error("Error fetching course data:", err)
+      setError("Không thể tải thông tin khóa học. Vui lòng thử lại sau.")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  // Sửa lỗi không thể quay về danh sách khóa học
-  const handleBackToDashboard = () => {
-    localStorage.removeItem("currentCourseId")
-    // Thêm cờ đánh dấu quay về trang chủ
+  const handleBack = () => {
     localStorage.setItem("isReturningToHome", "true")
     router.push("/")
   }
 
-  if (!user) {
-    return <LoginForm />
-  }
-
+  // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50">
@@ -112,177 +87,141 @@ export default function CoursePage({ params }: CoursePageProps) {
     )
   }
 
-  if (error || !courseData) {
+  // Error state
+  if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50">
-        <div className="text-center p-8 max-w-md">
-          <div className="text-red-500 text-5xl mb-4">⚠️</div>
-          <h2 className="text-2xl font-bold text-red-600 mb-4">Không thể tải khóa học</h2>
-          <p className="text-gray-600 mb-6">{error || "Khóa học không tồn tại hoặc bạn không có quyền truy cập"}</p>
-          <Button onClick={handleBackToDashboard}>Quay về trang chủ</Button>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50 p-4">
+        <div className="max-w-md w-full">
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+          <Button onClick={handleBack} className="w-full">
+            Quay lại trang chủ
+          </Button>
         </div>
       </div>
     )
   }
 
-  if (isAdmin && activeTab === "admin") {
+  // No course found
+  if (!course) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-        <header className="glass-effect border-b shadow-lg sticky top-0 z-50">
-          <div className="container mx-auto px-4 py-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3 animate-slide-up">
-                <Image
-                  src="/uth-logo.png"
-                  alt="UTH University Logo"
-                  width={120}
-                  height={40}
-                  className="h-10 w-auto drop-shadow-sm interactive-scale"
-                />
-                <div className="border-l border-slate-300 pl-3">
-                  <h1 className="text-xl font-bold bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-transparent leading-tight">
-                    Admin Dashboard
-                  </h1>
-                  <p className="text-xs text-slate-600 font-medium mt-0.5">Quản lý hệ thống E-Learning</p>
-                </div>
-              </div>
-              <UserHeader />
-            </div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50 p-4">
+        <div className="max-w-md w-full text-center">
+          <div className="mb-4">
+            <BookOpen className="h-12 w-12 mx-auto text-slate-400" />
           </div>
-        </header>
-        <main className="container mx-auto px-4 py-6">
-          <AdminDashboard courseId={parseInt(courseId)} />
-        </main>
+          <h3 className="text-xl font-medium text-slate-700 mb-2">Không tìm thấy khóa học</h3>
+          <p className="text-slate-500 mb-6">Khóa học này không tồn tại hoặc bạn không có quyền truy cập.</p>
+          <Button onClick={handleBack} className="w-full">
+            Quay lại trang chủ
+          </Button>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 animate-fade-in">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+      {/* Header */}
       <header className="glass-effect border-b shadow-lg sticky top-0 z-50">
         <div className="container mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3 animate-slide-up">
-              <Image
-                src="/uth-logo.png"
-                alt="UTH University Logo"
-                width={120}
-                height={40}
-                className="h-10 w-auto drop-shadow-sm interactive-scale"
-              />
-              <div className="border-l border-slate-300 pl-3">
-                <h1 className="text-xl font-bold bg-gradient-to-r from-teal-600 to-blue-600 bg-clip-text text-transparent leading-tight">
-                  {courseData.code} - {courseData.name}
-                </h1>
-                <p className="text-xs text-slate-600 font-medium mt-0.5">{courseData.instructor}</p>
-              </div>
-            </div>
+            <Button 
+              variant="ghost" 
+              className="flex items-center text-slate-700" 
+              onClick={handleBack}
+            >
+              <Home className="h-4 w-4 mr-2" />
+              <span>Trang chủ</span>
+            </Button>
             <UserHeader />
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-6">
-        <div className="mb-6 animate-slide-up">
-          <Button 
-            variant="outline" 
-            onClick={handleBackToDashboard} 
-            className="mb-4 flex items-center gap-2"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Trở về danh sách khóa học
-          </Button>
-          
-          <h2 className="text-2xl font-bold text-slate-800 mb-2">
-            {isAdmin ? "Quản lý khóa học" : courseData.name}
-          </h2>
-          <p className="text-slate-600 text-sm leading-relaxed">
-            {isAdmin
-              ? "Quản lý và giám sát các hoạt động học tập trong khóa học"
-              : courseData.description}
-          </p>
+      {/* Course header */}
+      <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white pt-8 pb-4">
+        <div className="container mx-auto px-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold mb-2 animate-slide-up">
+                {course.code} - {course.name}
+              </h1>
+              <p className="text-blue-100 animate-slide-up">
+                {course.instructor}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3 animate-slide-up">
+              <div className="flex items-center bg-white/20 rounded-full px-3 py-1">
+                <Clock className="h-4 w-4 mr-2" />
+                <span className="text-sm">{course.lectureCount} bài học</span>
+              </div>
+              <div className="flex items-center bg-white/20 rounded-full px-3 py-1">
+                <Users className="h-4 w-4 mr-2" />
+                <span className="text-sm">{course.enrollmentCount} học viên</span>
+              </div>
+              <div className="flex items-center bg-white/20 rounded-full px-3 py-1">
+                <LayoutDashboard className="h-4 w-4 mr-2" />
+                <span className="text-sm">{progress?.progress || 0}% hoàn thành</span>
+              </div>
+            </div>
+          </div>
         </div>
+      </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full animate-scale-in">
-          <TabsList
-            className={`grid w-full ${isAdmin ? "grid-cols-3 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-4"} mb-6 h-12 glass-effect border border-slate-200 rounded-xl p-1`}
-          >
-            <TabsTrigger
-              value="classroom"
-              className="flex items-center gap-2 text-sm font-medium data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-teal-700 rounded-lg transition-all duration-200 interactive-scale focus-ring"
-            >
-              <GraduationCap className="h-4 w-4" />
-              <span className="hidden sm:inline">Lớp học</span>
-              <span className="sm:hidden">Lớp</span>
+      {/* Course content */}
+      <div className="container mx-auto px-4 py-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="animate-fade-in">
+          <TabsList className="mb-6">
+            <TabsTrigger value="syllabus" className="flex items-center">
+              <BookOpen className="h-4 w-4 mr-2" />
+              <span>Nội dung học</span>
             </TabsTrigger>
-            <TabsTrigger
-              value="breakout"
-              className="flex items-center gap-2 text-sm font-medium data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-teal-700 rounded-lg transition-all duration-200 interactive-scale focus-ring"
-            >
-              <MessageSquare className="h-4 w-4" />
-              <span className="hidden sm:inline">Nhóm thảo luận</span>
-              <span className="sm:hidden">Nhóm</span>
+            <TabsTrigger value="assignments" className="flex items-center">
+              <FileText className="h-4 w-4 mr-2" />
+              <span>Bài tập</span>
             </TabsTrigger>
-            <TabsTrigger
-              value="schedule"
-              className="flex items-center gap-2 text-sm font-medium data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-teal-700 rounded-lg transition-all duration-200 interactive-scale focus-ring"
-            >
-              <CalendarDays className="h-4 w-4" />
-              <span className="hidden sm:inline">Lịch học</span>
-              <span className="sm:hidden">Lịch</span>
+            <TabsTrigger value="resources" className="flex items-center">
+              <FileText className="h-4 w-4 mr-2" />
+              <span>Tài liệu</span>
             </TabsTrigger>
-            <TabsTrigger
-              value="assignments"
-              className="flex items-center gap-2 text-sm font-medium data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-teal-700 rounded-lg transition-all duration-200 interactive-scale focus-ring"
-            >
-              <ClipboardList className="h-4 w-4" />
-              <span className="hidden sm:inline">Bài tập</span>
-              <span className="sm:hidden">BT</span>
+            <TabsTrigger value="discussions" className="flex items-center">
+              <MessageSquare className="h-4 w-4 mr-2" />
+              <span>Thảo luận</span>
             </TabsTrigger>
-
-            {isAdmin && (
-              <TabsTrigger
-                value="admin"
-                className="flex items-center gap-2 text-sm font-medium data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-red-700 rounded-lg transition-all duration-200 interactive-scale focus-ring"
-              >
-                <Settings className="h-4 w-4" />
-                <span className="hidden sm:inline">Quản lý</span>
-                <span className="sm:hidden">QL</span>
-              </TabsTrigger>
-            )}
+            <TabsTrigger value="students" className="flex items-center">
+              <Users className="h-4 w-4 mr-2" />
+              <span>Học viên</span>
+            </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="classroom" className="animate-fade-in">
-            <MainClassroom 
-              onJoinBreakout={handleJoinBreakout} 
-              userAssignedRoom={userAssignedRoom}
-              courseData={courseData}
+          <TabsContent value="syllabus">
+            <CourseSyllabus 
+              course={course} 
+              progress={progress} 
+              updateProgress={setProgress} 
             />
           </TabsContent>
 
-          <TabsContent value="breakout" className="animate-fade-in">
-            <BreakoutRooms 
-              userRole={isAdmin ? "admin" : "student"} 
-              assignedRoomId={userAssignedRoom}
-              courseId={parseInt(courseId)}
-            />
+          <TabsContent value="assignments">
+            <CourseAssignments courseId={course._id} />
           </TabsContent>
 
-          <TabsContent value="schedule" className="animate-fade-in">
-            <Schedule courseId={parseInt(courseId)} />
+          <TabsContent value="resources">
+            <CourseResources courseId={course._id} />
           </TabsContent>
 
-          <TabsContent value="assignments" className="animate-fade-in">
-            <Assignments courseId={parseInt(courseId)} />
+          <TabsContent value="discussions">
+            <CourseDiscussions courseId={course._id} />
           </TabsContent>
 
-          {isAdmin && (
-            <TabsContent value="admin" className="animate-fade-in">
-              <AdminDashboard courseId={parseInt(courseId)} />
-            </TabsContent>
-          )}
+          <TabsContent value="students">
+            <CourseStudents courseId={course._id} />
+          </TabsContent>
         </Tabs>
-      </main>
+      </div>
     </div>
   )
 }
