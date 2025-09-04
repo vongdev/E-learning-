@@ -9,7 +9,7 @@ const enrollmentRoutes = require('./enrollment.routes');
 const quizRoutes = require('./quiz.routes');
 const assignmentRoutes = require('./assignment.routes');
 const submissionRoutes = require('./submission.routes');
-const breakoutRoomRoutes = require('./breakoutroom.routes');
+const breakoutRoomRoutes = require('./breakoutRoom.routes');
 const progressRoutes = require('./progress.routes');
 
 // Mount routes

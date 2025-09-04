@@ -20,7 +20,7 @@ const { cacheMiddleware } = require('./middleware/cache');
 // Import DB and Routes
 const connectDB = require('./config/db');
 const mainRouter = require('./routes/index.routes'); // Sử dụng file route chính
-const socketHandler = require('./socket/socket'); // Tách logic socket
+const socketHandler = require('./utils/socket'); // Đường dẫn đúng
 
 // Load env vars
 dotenv.config();
@@ -67,7 +67,7 @@ app.use('/api/assignments/:assignmentId/submissions', submissionLimiter);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Mount main router
-app.use('/api/v1', mainRouter); // Versioning API
+app.use('api', mainRouter); // Versioning API
 
 // Health check endpoint
 app.get('/health', (req, res) => res.status(200).send('OK'));
