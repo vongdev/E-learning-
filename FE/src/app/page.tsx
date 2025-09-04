@@ -6,102 +6,112 @@ import Image from "next/image"
 import { useAuth } from "@/contexts/auth-context"
 import { LoginForm } from "@/components/shared/login-form"
 import { UserHeader } from "@/components/shared/user-header"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { GraduationCap, BookOpen, Clock, Calendar, ChevronRight } from "lucide-react"
+import { Search } from "lucide-react"
+import { BookOpen } from "lucide-react"
+import { ErrorDisplay } from "@/components/ui/error-display"
+import { Input } from "@/components/ui/input"
+import { SkeletonCard } from "@/components/ui/skeleton-card"
+import { useEnrolledCourses } from "@/hooks/useEnrolledCourses"
+import { useSearchFilter } from "@/hooks/useSearchFilter"
+import { CourseCard } from "@/components/course/CourseCard"
+import { useToast } from "@/components/ui/use-toast"
+import { CourseStatus, EnrollmentStatus } from "@/types/course"
 
-/**
- * Trang chủ - hiển thị danh sách các khóa học hoặc form đăng nhập
- * nếu chưa đăng nhập
- */
 export default function HomePage() {
-  const { user, isAdmin, isStudent } = useAuth()
+  const { user, isAdmin } = useAuth()
   const router = useRouter()
-  const [courses, setCourses] = useState<any[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [returning, setReturning] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
+  const { toast } = useToast()
+
+  // Sử dụng custom hook để lấy danh sách khóa học
+  const { 
+    data: coursesData, 
+    isLoading, 
+    error, 
+    refetch 
+  } = useEnrolledCourses(user?.id);
+
+  // Sử dụng custom hook để lọc khóa học với debounce
+  const { 
+    filteredItems: filteredCourses,
+    inputValue,
+    setInputValue
+  } = useSearchFilter(
+    coursesData,
+    searchTerm,
+    ['name', 'code', 'instructor'],
+    300 // 300ms debounce
+  );
 
   useEffect(() => {
-    // Kiểm tra nếu đang quay về từ trang chi tiết
-    const isReturning = localStorage.getItem("isReturningToHome")
-    if (isReturning) {
-      // Xóa cờ và tải danh sách khóa học
-      localStorage.removeItem("isReturningToHome")
-      setIsLoading(true)
-    } else {
-      // Kiểm tra đăng nhập và phục hồi khóa học đang xem
-      const savedCourseId = localStorage.getItem("currentCourseId")
-      if (user && savedCourseId) {
-        router.push(`/course/${savedCourseId}`)
-        return
-      }
-    }
+    // Ensure we're running on the client before accessing localStorage
+    if (typeof window === "undefined") return;
 
-    // Lấy danh sách khóa học khi đã đăng nhập
-    if (user) {
-      // Mô phỏng API call
-      setTimeout(() => {
-        setCourses([
-          {
-            id: 1,
-            code: "MKT301",
-            name: "Nguyên lý Marketing",
-            instructor: "TS. Nguyễn Văn Minh",
-            description: "Tìm hiểu về các nguyên lý cơ bản của marketing và cách áp dụng trong thực tế",
-            progress: 35,
-            nextClass: "Thứ 3, 14:00",
-            assignments: 3,
-            unread: 2,
-          },
-          {
-            id: 2,
-            code: "CSC401",
-            name: "Lập trình Web nâng cao",
-            instructor: "ThS. Trần Thị Lan",
-            description: "Phát triển ứng dụng web với React, Next.js và các công nghệ hiện đại",
-            progress: 78,
-            nextClass: "Thứ 5, 09:00",
-            assignments: 5,
-            unread: 0,
-          },
-          {
-            id: 3,
-            code: "FIN201",
-            name: "Tài chính doanh nghiệp",
-            instructor: "PGS.TS. Lê Văn Hùng",
-            description: "Phân tích tài chính và quản lý vốn trong doanh nghiệp",
-            progress: 15,
-            nextClass: "Thứ 6, 13:30",
-            assignments: 2,
-            unread: 1,
-          },
-        ])
-        setIsLoading(false)
-      }, 800)
+    try {
+      // Kiểm tra nếu đang quay về từ trang chi tiết
+      const isReturning = localStorage.getItem("isReturningToHome")
+      if (isReturning) {
+        // Xóa cờ
+        localStorage.removeItem("isReturningToHome")
+        setReturning(true)
+      } else {
+        // Kiểm tra đăng nhập và phục hồi khóa học đang xem
+        const savedCourseId = localStorage.getItem("currentCourseId")
+        if (user && savedCourseId) {
+          router.push(`/course/${savedCourseId}`)
+          return
+        }
+      }
+    } catch (err) {
+      console.error("Error in homepage initialization:", err);
+      toast({
+        title: "Lỗi",
+        description: "Có lỗi xảy ra khi khởi tạo trang chủ",
+        variant: "destructive"
+      });
     }
-  }, [user, router])
+  }, [user, router, toast]);
 
   // Xử lý khi click vào khóa học
-  const handleCourseClick = (courseId: number) => {
-    localStorage.setItem("currentCourseId", courseId.toString())
-    // Xóa cờ quay về trước khi chuyển đến trang chi tiết
-    localStorage.removeItem("isReturningToHome")
-    router.push(`/course/${courseId}`)
+  const handleCourseClick = (courseId: string) => {
+    try {
+      localStorage.setItem("currentCourseId", courseId)
+      // Xóa cờ quay về trước khi chuyển đến trang chi tiết
+      localStorage.removeItem("isReturningToHome")
+      router.push(`/course/${courseId}`)
+    } catch (err) {
+      console.error("Error navigating to course:", err);
+      toast({
+        title: "Lỗi",
+        description: "Không thể chuyển đến trang chi tiết khóa học",
+        variant: "destructive"
+      });
+    }
   }
 
   // Nếu chưa đăng nhập, hiển thị trang đăng nhập
   if (!user) {
-    return <LoginForm />
-  }
-
-  // Hiển thị loading state
-  if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Đang tải thông tin khóa học...</p>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center justify-center p-4">
+        <div className="mb-8 flex flex-col items-center">
+          <Image
+            src="/uth-logo.png"
+            alt="UTH University Logo"
+            width={180}
+            height={60}
+            className="mb-4 drop-shadow-md"
+            priority
+          />
+          <h1 className="text-3xl font-bold text-center bg-gradient-to-r from-teal-600 to-blue-600 bg-clip-text text-transparent">
+            E-Learning Platform
+          </h1>
+          <p className="text-slate-600 font-medium mt-2 text-center">
+            Đại học Giao thông Vận tải TP.HCM
+          </p>
         </div>
+        <LoginForm />
       </div>
     )
   }
@@ -145,67 +155,90 @@ export default function HomePage() {
           </p>
         </div>
 
-        {/* Course list */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
-          {courses.map((course) => (
-            <Card 
-              key={course.id} 
-              className="overflow-hidden border-2 border-transparent hover:border-blue-300 transition-all duration-300 hover:shadow-lg cursor-pointer"
-              onClick={() => handleCourseClick(course.id)}
-            >
-              <CardHeader className="bg-gradient-to-r from-blue-500 to-purple-500 text-white pb-4">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg font-bold">
-                    {course.code} - {course.name}
-                  </CardTitle>
-                  {course.unread > 0 && (
-                    <Badge className="bg-red-400 text-white">
-                      {course.unread} mới
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-sm text-blue-50 mt-1">{course.instructor}</p>
-              </CardHeader>
-              <CardContent className="p-5">
-                <p className="text-sm text-gray-600 mb-4 line-clamp-2">{course.description}</p>
-                
-                <div className="space-y-3">
-                  <div className="space-y-2">
-                    <p className="text-xs text-gray-500 font-medium flex items-center justify-between">
-                      <span>Tiến độ</span>
-                      <span>{course.progress}%</span>
-                    </p>
-                    <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full" 
-                        style={{ width: `${course.progress}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 pt-3">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Calendar className="h-4 w-4 text-blue-500" />
-                      <span className="text-gray-700">{course.nextClass}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm">
-                      <BookOpen className="h-4 w-4 text-purple-500" />
-                      <span className="text-gray-700">{course.assignments} bài tập</span>
-                    </div>
-                  </div>
-                </div>
-
-                <Button 
-                  className="w-full mt-5 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
-                >
-                  <GraduationCap className="h-4 w-4 mr-2" />
-                  Vào lớp học
-                  <ChevronRight className="h-4 w-4 ml-2" />
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+        {/* Search bar */}
+        <div className="relative mb-6">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4" />
+          <Input
+            type="text"
+            placeholder="Tìm kiếm khóa học theo tên, mã hoặc giảng viên..."
+            className="pl-10 bg-white dark:bg-slate-800"
+            value={inputValue}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+              setInputValue(e.target.value);
+              setSearchTerm(e.target.value);
+            }}
+          />
         </div>
+
+        {/* Error message */}
+        {error && (
+          <ErrorDisplay 
+            message="Không thể tải danh sách khóa học. Vui lòng thử lại sau." 
+            onRetry={() => refetch()}
+          />
+        )}
+
+        {/* Loading state with skeleton */}
+        {isLoading && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[...Array(6)].map((_, index) => (
+              <SkeletonCard key={index} />
+            ))}
+          </div>
+        )}
+
+        {/* Course list */}
+        {!isLoading && filteredCourses && filteredCourses.length > 0 ? (
+  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
+    {filteredCourses.map((course: any) => {
+      // Tạo ID an toàn - sử dụng _id nếu có hoặc tạo một ID tạm thời từ code
+      const courseId = course._id || course.id || `course-${course.code}`;
+      
+      return (
+        <CourseCard
+          key={courseId}
+          course={{
+            id: courseId,
+            code: course.code || "",
+            name: course.name || course.title || "",
+            instructor: course.instructor || "Không có thông tin giảng viên",
+            status: (course.status || "published") as CourseStatus,
+            enrollmentStatus: (course.enrollmentStatus || "in-progress") as EnrollmentStatus,
+            progress: course.progress || 0,
+            nextClass: course.nextClass || "Đang cập nhật",
+            assignments: course.assignments || 0,
+            pendingAssignments: course.pendingAssignments || 0,
+            thumbnail: course.thumbnail || undefined,
+            lastAccessed: course.lastAccessed || undefined
+          }}
+          onJoinCourse={handleCourseClick}
+        />
+      );
+    })}
+  </div>
+) : !isLoading && (
+          <div className="text-center py-12">
+            <div className="mb-4">
+              <BookOpen className="h-12 w-12 mx-auto text-slate-400" />
+            </div>
+            <h3 className="text-xl font-medium text-slate-700 mb-2">
+              {searchTerm ? "Không tìm thấy khóa học phù hợp" : "Chưa có khóa học nào"}
+            </h3>
+            <p className="text-slate-500 mb-6">
+              {searchTerm 
+                ? "Vui lòng thử từ khóa khác hoặc xóa bộ lọc" 
+                : "Bạn chưa được đăng ký vào khóa học nào."}
+            </p>
+            {searchTerm ? (
+              <Button onClick={() => {
+                setSearchTerm("");
+                setInputValue("");
+              }}>Xóa bộ lọc</Button>
+            ) : (
+              <Button onClick={() => router.push('/explore')}>Khám phá khóa học</Button>
+            )}
+          </div>
+        )}
       </main>
     </div>
   )

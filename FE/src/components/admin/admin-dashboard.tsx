@@ -36,6 +36,26 @@ interface AdminDashboardProps {
   courseId?: number;
 }
 
+interface BreakoutMember {
+  id: number;
+  name: string;
+  isLeader: boolean;
+}
+
+interface Student {
+  id: number;
+  name: string;
+  isLeader?: boolean;
+}
+interface BreakoutGroup {
+  id: number;
+  name: string;
+  members: Student[];
+  topic: string;
+  status: "active" | "waiting";
+  maxMembers: number;
+}
+
 export function AdminDashboard({ courseId }: AdminDashboardProps = {}) {
   const [activeTab, setActiveTab] = useState("overview")
   const [showCreateQuiz, setShowCreateQuiz] = useState(false)
@@ -43,12 +63,7 @@ export function AdminDashboard({ courseId }: AdminDashboardProps = {}) {
   const [showGroupManager, setShowGroupManager] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedFilter, setSelectedFilter] = useState("all")
-
-  const contextTitle = courseId 
-    ? `Quản lý khóa học #${courseId}` 
-    : "Quản lý tất cả khóa học";
-
-  const [breakoutGroups, setBreakoutGroups] = useState([
+  const [breakoutGroups, setBreakoutGroups] = useState<BreakoutGroup[]>([
     {
       id: 1,
       name: "Nhóm 1 - Thảo luận Case A",
@@ -324,31 +339,38 @@ const handleExportData = () => {
   }
 
   const handleRandomAssign = () => {
-    const shuffled = [...unassignedStudents].sort(() => Math.random() - 0.5)
-    let studentIndex = 0
+    try {
+      const shuffled = [...unassignedStudents].sort(() => Math.random() - 0.5);
+      let updatedGroups = [...breakoutGroups];
+      let remaining = [...shuffled];
+      
+      for (let i = 0; i < updatedGroups.length && remaining.length > 0; i++) {
+        const group = updatedGroups[i];
+        const availableSlots = group.maxMembers - group.members.length;
+        
+        if (availableSlots <= 0) continue;
+        
+        const studentsToAdd = remaining.slice(0, availableSlots);
+        remaining = remaining.slice(availableSlots);
+        
+        group.members = [
+          ...group.members,
+          ...studentsToAdd.map((student, index) => ({
+            ...student,
+            isLeader: group.members.length === 0 && index === 0,
+          })),
+        ];
+        
+        group.status = group.members.length > 0 ? "active" : group.status;
+      }
+      
+      setBreakoutGroups(updatedGroups);
+      setUnassignedStudents(remaining);
+    } catch (error) {
+      console.error("Error assigning students randomly:", error);
+    }
+  };
 
-    setBreakoutGroups((prev) =>
-      prev.map((group) => {
-        const availableSlots = group.maxMembers - group.members.length
-        const studentsToAdd = shuffled.slice(studentIndex, studentIndex + availableSlots)
-        studentIndex += studentsToAdd.length
-
-        return {
-          ...group,
-          members: [
-            ...group.members,
-            ...studentsToAdd.map((student, index) => ({
-              ...student,
-              isLeader: group.members.length === 0 && index === 0,
-            })),
-          ],
-          status: group.members.length === 0 && studentsToAdd.length > 0 ? "active" : group.status,
-        }
-      }),
-    )
-
-    setUnassignedStudents(shuffled.slice(studentIndex))
-  }
 
   const handleSetLeader = (studentId: number, groupId: number) => {
     setBreakoutGroups((prev) =>
@@ -374,7 +396,7 @@ const handleExportData = () => {
           <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
             Admin Dashboard
           </h1>
-          <p className="text-gray-600 mt-1">{contextTitle}</p>
+          <p className="text-gray-600 mt-1">{courseId ? `Khóa học: ${courseId}` : 'Tất cả khóa học'}</p>
         </div>
         <div className="flex items-center space-x-3">
           <Button variant="outline" onClick={() => console.log(`Exporting data for course: ${courseId || 'all'}`)} className="hover:bg-gray-50 bg-transparent">

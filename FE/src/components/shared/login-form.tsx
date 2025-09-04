@@ -1,95 +1,127 @@
-"use client"
+"use client";
 
-import type React from "react"
-
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
-import { useAuth } from "@/contexts/auth-context"
-import { LogIn, User, Lock } from "lucide-react"
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useAuth } from "@/contexts/auth-context";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertCircle, ArrowRight, Loader2 } from "lucide-react";
 
 export function LoginForm() {
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState("")
-  const { login } = useAuth()
+  const { login, error, clearError, isLoading } = useAuth();
+  const router = useRouter();
+  const [formData, setFormData] = useState({
+    email: "",
+    password: "",
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value,
+    });
+    // Xóa lỗi khi người dùng bắt đầu nhập
+    if (error) clearError();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    setError("")
-
-    const success = await login(email, password)
-    if (!success) {
-      setError("Email hoặc mật khẩu không đúng")
+    e.preventDefault();
+    
+    try {
+      await login(formData.email, formData.password);
+      router.push("/");
+    } catch (err) {
+      // Lỗi đã được xử lý trong auth context
+      console.error("Login failed:", err);
     }
-    setIsLoading(false)
-  }
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto w-12 h-12 bg-primary rounded-full flex items-center justify-center mb-4">
-            <LogIn className="h-6 w-6 text-white" />
+    <Card className="w-full max-w-md shadow-lg animate-fade-in border-2 border-blue-100">
+      <CardHeader className="space-y-1">
+        <CardTitle className="text-2xl font-bold text-center">Đăng nhập</CardTitle>
+        <CardDescription className="text-center">
+          Nhập thông tin đăng nhập để truy cập vào hệ thống
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {error && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              placeholder="your.email@example.com"
+              value={formData.email}
+              onChange={handleChange}
+              required
+              disabled={isLoading}
+              className="focus:border-blue-500"
+            />
           </div>
-          <CardTitle className="text-2xl font-bold">Đăng nhập</CardTitle>
-          <CardDescription>Truy cập vào hệ thống E-Learning UTH</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="relative">
-                <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="admin@uth.edu.vn hoặc student@uth.edu.vn"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="pl-10"
-                  required
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
               <Label htmlFor="password">Mật khẩu</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Nhập mật khẩu"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10"
-                  required
-                />
-              </div>
+              <Link
+                href="/auth/forgot-password"
+                className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+              >
+                Quên mật khẩu?
+              </Link>
             </div>
-            {error && <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{error}</p>}
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Đang đăng nhập..." : "Đăng nhập"}
-            </Button>
-          </form>
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm font-medium text-gray-700 mb-2">Tài khoản demo:</p>
-            <div className="space-y-1 text-xs text-gray-600">
-              <p>
-                <strong>Admin:</strong> admin@uth.edu.vn
-              </p>
-              <p>
-                <strong>Sinh viên:</strong> student@uth.edu.vn
-              </p>
-              <p className="text-gray-500">Mật khẩu: bất kỳ</p>
-            </div>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              placeholder="••••••••"
+              value={formData.password}
+              onChange={handleChange}
+              required
+              disabled={isLoading}
+              className="focus:border-blue-500"
+            />
           </div>
-        </CardContent>
-      </Card>
-    </div>
-  )
+          
+          <Button
+            type="submit"
+            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Đang xử lý...
+              </>
+            ) : (
+              <>
+                Đăng nhập <ArrowRight className="ml-2 h-4 w-4" />
+              </>
+            )}
+          </Button>
+        </form>
+      </CardContent>
+      <CardFooter className="flex flex-col space-y-4">
+        <div className="text-sm text-center text-gray-500">
+          Chưa có tài khoản?{" "}
+          <Link
+            href="/auth/register"
+            className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+          >
+            Đăng ký ngay
+          </Link>
+        </div>
+      </CardFooter>
+    </Card>
+  );
 }

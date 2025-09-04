@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { CourseCard } from "./course-card"
+import { CourseCard } from "./CourseCard"
 import { Input } from "@/components/ui/input"
 import { Search, BookOpen } from "lucide-react"
 

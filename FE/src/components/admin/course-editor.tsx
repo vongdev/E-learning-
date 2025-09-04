@@ -8,11 +8,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { 
   BookOpen, Save, X, Upload, FileText, Video, Plus, Edit, Trash2, Eye, 
   RotateCw, Clock, CheckCircle2, Info, Globe, Users, Calendar, GraduationCap,
-  ClipboardList, Trophy
+  ClipboardList, Trophy, AlertTriangle
 } from "lucide-react"
 
 interface Lecture {
@@ -217,6 +218,26 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
   const [currentSectionId, setCurrentSectionId] = useState<string | null>(null)
   const [currentLecture, setCurrentLecture] = useState<Lecture | null>(null)
   const [currentAssignment, setCurrentAssignment] = useState<Assignment | null>(null)
+  const [confirmDialog, setConfirmDialog] = useState<{
+    show: boolean;
+    title: string;
+    message: string;
+    action: () => void;
+  }>({
+    show: false,
+    title: '',
+    message: '',
+    action: () => {}
+  })
+  const [uploadState, setUploadState] = useState<{
+    file: File | null;
+    progress: number;
+    error: string | null;
+  }>({
+    file: null,
+    progress: 0,
+    error: null
+  })
   
   // Form states
   const [courseForm, setCourseForm] = useState({ ...course })
@@ -233,193 +254,464 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
     points: 100,
     status: "draft"
   })
+  const [formErrors, setFormErrors] = useState<{
+    courseForm: Record<string, string>;
+    newSection: Record<string, string>;
+    newLecture: Record<string, string>;
+    newAssignment: Record<string, string>;
+  }>({
+    courseForm: {},
+    newSection: {},
+    newLecture: {},
+    newAssignment: {}
+  })
+
+  // Helper functions
+  const findSectionById = useCallback((id: string): CourseSection | undefined => {
+    return course.sections.find(section => section.id === id);
+  }, [course.sections]);
+
+  const findLectureById = useCallback((id: string): {lecture: Lecture, sectionId: string} | undefined => {
+    for (const section of course.sections) {
+      const lecture = section.lectures.find(lecture => lecture.id === id);
+      if (lecture) return { lecture, sectionId: section.id };
+    }
+    return undefined;
+  }, [course.sections]);
+
+  const validateField = (value: string, fieldName: string, minLength = 3): string => {
+    if (!value.trim()) return `${fieldName} không được để trống`;
+    if (value.trim().length < minLength) return `${fieldName} phải có ít nhất ${minLength} ký tự`;
+    return '';
+  };
 
   // Toggle section expand/collapse
   const toggleSection = (sectionId: string) => {
-    setCourse({
-      ...course,
-      sections: course.sections.map(section =>
+    setCourse(prevCourse => ({
+      ...prevCourse,
+      sections: prevCourse.sections.map(section =>
         section.id === sectionId
           ? { ...section, isExpanded: !section.isExpanded }
           : section
       )
-    })
+    }));
   }
 
   // Create a new section
   const handleAddSection = () => {
-    if (!newSection.title) return
+    try {
+      // Validate form
+      const titleError = validateField(newSection.title, 'Tên phần học');
+      if (titleError) {
+        setFormErrors(prev => ({
+          ...prev,
+          newSection: { ...prev.newSection, title: titleError }
+        }));
+        return;
+      }
 
-    const newSectionObj: CourseSection = {
-      id: `section-${Date.now()}`,
-      title: newSection.title,
-      description: newSection.description || undefined,
-      order: course.sections.length + 1,
-      lectures: [],
-      isExpanded: true
+      const newSectionObj: CourseSection = {
+        id: `section-${Date.now()}`,
+        title: newSection.title.trim(),
+        description: newSection.description ? newSection.description.trim() : undefined,
+        order: course.sections.length + 1,
+        lectures: [],
+        isExpanded: true
+      }
+
+      setCourse(prevCourse => ({
+        ...prevCourse,
+        sections: [...prevCourse.sections, newSectionObj]
+      }));
+
+      setNewSection({ title: "", description: "" });
+      setFormErrors(prev => ({ ...prev, newSection: {} }));
+      setShowAddSectionDialog(false);
+    } catch (error) {
+      console.error("Error adding section:", error);
     }
-
-    setCourse({
-      ...course,
-      sections: [...course.sections, newSectionObj]
-    })
-
-    setNewSection({ title: "", description: "" })
-    setShowAddSectionDialog(false)
   }
   
   // Create a new lecture
   const handleAddLecture = () => {
-    if (!newLecture.title || !currentSectionId) return
+    try {
+      // Validate form
+      const errors: Record<string, string> = {};
+      if (!newLecture.title?.trim()) errors.title = 'Tên bài giảng không được để trống';
+      if (!currentSectionId) errors.general = 'Không tìm thấy phần học';
+      
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(prev => ({
+          ...prev,
+          newLecture: errors
+        }));
+        return;
+      }
 
-    const newLectureObj: Lecture = {
-      id: `lecture-${Date.now()}`,
-      title: newLecture.title,
-      description: newLecture.description || "",
-      type: newLecture.type as "video" | "document" | "quiz",
-      order: course.sections.find(s => s.id === currentSectionId)?.lectures.length || 0 + 1,
-      status: "draft",
-      createdAt: new Date(),
-      updatedAt: new Date()
+      const section = findSectionById(currentSectionId!);
+      if (!section) return;
+
+      const order = section.lectures.length + 1;
+      const now = new Date();
+
+      const newLectureObj: Lecture = {
+        id: `lecture-${Date.now()}`,
+        title: newLecture.title!.trim(),
+        description: newLecture.description?.trim() || "",
+        type: newLecture.type as "video" | "document" | "quiz",
+        order,
+        status: "draft",
+        createdAt: now,
+        updatedAt: now
+      };
+      
+      // Add specific fields based on type
+      if (newLecture.type === "video") {
+        newLectureObj.duration = newLecture.duration || 0;
+        newLectureObj.fileName = newLecture.fileName || `video-${Date.now()}.mp4`;
+        newLectureObj.fileSize = newLecture.fileSize || "0 MB";
+        newLectureObj.url = newLecture.url || "";
+      } else if (newLecture.type === "document") {
+        newLectureObj.fileName = newLecture.fileName || `document-${Date.now()}.pdf`;
+        newLectureObj.fileSize = newLecture.fileSize || "0 MB";
+        newLectureObj.url = newLecture.url || "";
+      }
+
+      setCourse(prevCourse => ({
+        ...prevCourse,
+        sections: prevCourse.sections.map(section =>
+          section.id === currentSectionId
+            ? { ...section, lectures: [...section.lectures, newLectureObj] }
+            : section
+        )
+      }));
+
+      setNewLecture({
+        title: "",
+        description: "",
+        type: "video"
+      });
+      setFormErrors(prev => ({ ...prev, newLecture: {} }));
+      setShowAddLectureDialog(false);
+    } catch (error) {
+      console.error("Error adding lecture:", error);
     }
-    
-    // Add specific fields based on type
-    if (newLecture.type === "video") {
-      newLectureObj.duration = newLecture.duration || 0
-      newLectureObj.fileName = newLecture.fileName || "video.mp4"
-      newLectureObj.fileSize = newLecture.fileSize || "0 MB"
-    } else if (newLecture.type === "document") {
-      newLectureObj.fileName = newLecture.fileName || "document.pdf"
-      newLectureObj.fileSize = newLecture.fileSize || "0 MB"
-    }
-
-    setCourse({
-      ...course,
-      sections: course.sections.map(section =>
-        section.id === currentSectionId
-          ? { ...section, lectures: [...section.lectures, newLectureObj] }
-          : section
-      )
-    })
-
-    setNewLecture({
-      title: "",
-      description: "",
-      type: "video"
-    })
-    setShowAddLectureDialog(false)
   }
   
   // Create a new assignment
   const handleAddAssignment = () => {
-    if (!newAssignment.title) return
+    try {
+      // Validate form
+      const errors: Record<string, string> = {};
+      if (!newAssignment.title?.trim()) errors.title = 'Tên bài tập không được để trống';
+      if (!newAssignment.dueDate) errors.dueDate = 'Hạn nộp không được để trống';
+      if (!newAssignment.points || newAssignment.points <= 0) errors.points = 'Điểm tối đa phải lớn hơn 0';
+      
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(prev => ({
+          ...prev,
+          newAssignment: errors
+        }));
+        return;
+      }
 
-    const newAssignmentObj: Assignment = {
-      id: `assignment-${Date.now()}`,
-      title: newAssignment.title,
-      description: newAssignment.description || "",
-      dueDate: newAssignment.dueDate || new Date(),
-      points: newAssignment.points || 100,
-      status: newAssignment.status as "draft" | "published" | "archived" || "draft"
+      const newAssignmentObj: Assignment = {
+        id: `assignment-${Date.now()}`,
+        title: newAssignment.title!.trim(),
+        description: newAssignment.description?.trim() || "",
+        dueDate: newAssignment.dueDate || new Date(),
+        points: newAssignment.points || 100,
+        status: newAssignment.status as "draft" | "published" | "archived" || "draft"
+      };
+
+      setCourse(prevCourse => ({
+        ...prevCourse,
+        assignments: [...prevCourse.assignments, newAssignmentObj]
+      }));
+
+      setNewAssignment({
+        title: "",
+        description: "",
+        dueDate: new Date(),
+        points: 100,
+        status: "draft"
+      });
+      setFormErrors(prev => ({ ...prev, newAssignment: {} }));
+      setShowAddAssignmentDialog(false);
+    } catch (error) {
+      console.error("Error adding assignment:", error);
     }
-
-    setCourse({
-      ...course,
-      assignments: [...course.assignments, newAssignmentObj]
-    })
-
-    setNewAssignment({
-      title: "",
-      description: "",
-      dueDate: new Date(),
-      points: 100,
-      status: "draft"
-    })
-    setShowAddAssignmentDialog(false)
   }
 
   // Update lecture details
   const handleUpdateLecture = () => {
-    if (!currentLecture) return
+    try {
+      if (!currentLecture) return;
 
-    setCourse({
-      ...course,
-      sections: course.sections.map(section => ({
-        ...section,
-        lectures: section.lectures.map(lecture => 
-          lecture.id === currentLecture.id ? currentLecture : lecture
-        )
-      }))
-    })
+      // Validate form
+      const titleError = validateField(currentLecture.title, 'Tên bài giảng');
+      if (titleError) {
+        // Handle error
+        return;
+      }
 
-    setCurrentLecture(null)
+      // Update updatedAt timestamp
+      const updatedLecture = {
+        ...currentLecture,
+        updatedAt: new Date()
+      };
+
+      setCourse(prevCourse => ({
+        ...prevCourse,
+        sections: prevCourse.sections.map(section => ({
+          ...section,
+          lectures: section.lectures.map(lecture => 
+            lecture.id === currentLecture.id ? updatedLecture : lecture
+          )
+        }))
+      }));
+
+      setCurrentLecture(null);
+    } catch (error) {
+      console.error("Error updating lecture:", error);
+    }
   }
   
   // Update assignment details
   const handleUpdateAssignment = () => {
-    if (!currentAssignment) return
+    try {
+      if (!currentAssignment) return;
 
-    setCourse({
-      ...course,
-      assignments: course.assignments.map(assignment => 
-        assignment.id === currentAssignment.id ? currentAssignment : assignment
-      )
-    })
+      // Validate form
+      const titleError = validateField(currentAssignment.title, 'Tên bài tập');
+      if (titleError) {
+        // Handle error
+        return;
+      }
 
-    setCurrentAssignment(null)
+      setCourse(prevCourse => ({
+        ...prevCourse,
+        assignments: prevCourse.assignments.map(assignment => 
+          assignment.id === currentAssignment.id ? currentAssignment : assignment
+        )
+      }));
+
+      setCurrentAssignment(null);
+    } catch (error) {
+      console.error("Error updating assignment:", error);
+    }
+  }
+
+  // Confirm delete operations
+  const confirmDeleteAction = (title: string, message: string, action: () => void) => {
+    setConfirmDialog({
+      show: true,
+      title,
+      message,
+      action
+    });
   }
 
   // Delete a lecture
   const handleDeleteLecture = (lectureId: string, sectionId: string) => {
-    setCourse({
-      ...course,
-      sections: course.sections.map(section =>
-        section.id === sectionId
-          ? { 
-              ...section, 
-              lectures: section.lectures.filter(lecture => lecture.id !== lectureId) 
-            }
-          : section
-      )
-    })
+    confirmDeleteAction(
+      "Xóa bài giảng",
+      "Bạn có chắc chắn muốn xóa bài giảng này? Hành động này không thể hoàn tác.",
+      () => {
+        try {
+          setCourse(prevCourse => ({
+            ...prevCourse,
+            sections: prevCourse.sections.map(section =>
+              section.id === sectionId
+                ? { 
+                    ...section, 
+                    lectures: section.lectures.filter(lecture => lecture.id !== lectureId) 
+                  }
+                : section
+            )
+          }));
+          setConfirmDialog(prev => ({ ...prev, show: false }));
+        } catch (error) {
+          console.error("Error deleting lecture:", error);
+        }
+      }
+    );
   }
   
   // Delete a section
   const handleDeleteSection = (sectionId: string) => {
-    setCourse({
-      ...course,
-      sections: course.sections.filter(section => section.id !== sectionId)
-    })
+    const section = findSectionById(sectionId);
+    if (!section) return;
+
+    const message = section.lectures.length > 0 
+      ? `Phần học này có ${section.lectures.length} bài giảng. Tất cả bài giảng sẽ bị xóa. Bạn có chắc chắn muốn xóa?`
+      : "Bạn có chắc chắn muốn xóa phần học này?";
+
+    confirmDeleteAction("Xóa phần học", message, () => {
+      try {
+        setCourse(prevCourse => ({
+          ...prevCourse,
+          sections: prevCourse.sections.filter(section => section.id !== sectionId)
+            .map((section, index) => ({ ...section, order: index + 1 }))
+        }));
+        setConfirmDialog(prev => ({ ...prev, show: false }));
+      } catch (error) {
+        console.error("Error deleting section:", error);
+      }
+    });
   }
   
   // Delete an assignment
   const handleDeleteAssignment = (assignmentId: string) => {
-    setCourse({
-      ...course,
-      assignments: course.assignments.filter(assignment => assignment.id !== assignmentId)
-    })
+    confirmDeleteAction(
+      "Xóa bài tập",
+      "Bạn có chắc chắn muốn xóa bài tập này? Hành động này không thể hoàn tác.",
+      () => {
+        try {
+          setCourse(prevCourse => ({
+            ...prevCourse,
+            assignments: prevCourse.assignments.filter(assignment => assignment.id !== assignmentId)
+          }));
+          setConfirmDialog(prev => ({ ...prev, show: false }));
+        } catch (error) {
+          console.error("Error deleting assignment:", error);
+        }
+      }
+    );
   }
+
+  // Handle file upload
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>, fileType: 'video' | 'document' | 'image') => {
+    try {
+      const files = event.target.files;
+      if (!files || files.length === 0) return;
+      
+      const file = files[0];
+      const allowedTypes: Record<string, string[]> = {
+        video: ['video/mp4', 'video/webm'],
+        document: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        image: ['image/jpeg', 'image/png', 'image/jpg']
+      };
+      
+      if (!allowedTypes[fileType].includes(file.type)) {
+        setUploadState({
+          file: null,
+          progress: 0,
+          error: `Chỉ chấp nhận file định dạng: ${allowedTypes[fileType].join(', ')}`
+        });
+        return;
+      }
+      
+      // Simulating upload progress
+      setUploadState({
+        file,
+        progress: 0,
+        error: null
+      });
+      
+      // Mock upload progress
+      let progress = 0;
+      const interval = setInterval(() => {
+        progress += 10;
+        setUploadState(prev => ({ ...prev, progress }));
+        
+        if (progress >= 100) {
+          clearInterval(interval);
+          
+          // Update form based on file type
+          if (fileType === 'video' && newLecture.type === 'video') {
+            setNewLecture(prev => ({
+              ...prev,
+              fileName: file.name,
+              fileSize: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+              url: URL.createObjectURL(file)
+            }));
+          } else if (fileType === 'document' && newLecture.type === 'document') {
+            setNewLecture(prev => ({
+              ...prev,
+              fileName: file.name,
+              fileSize: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+              url: URL.createObjectURL(file)
+            }));
+          } else if (fileType === 'image') {
+            setCourseForm(prev => ({
+              ...prev,
+              thumbnail: URL.createObjectURL(file)
+            }));
+          }
+        }
+      }, 300);
+      
+      // Reset file input
+      event.target.value = '';
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      setUploadState({
+        file: null,
+        progress: 0,
+        error: "Có lỗi xảy ra khi tải lên file. Vui lòng thử lại."
+      });
+    }
+  };
 
   // Save course changes
   const handleSaveCourse = () => {
-    // Update course with form data
-    setCourse(courseForm)
-    setEditMode(null)
-    
-    // In a real app, we would make an API call here
-    console.log("Course saved:", courseForm)
+    try {
+      // Validate form
+      const errors: Record<string, string> = {};
+      if (!courseForm.title.trim()) errors.title = 'Tên khóa học không được để trống';
+      if (!courseForm.code.trim()) errors.code = 'Mã khóa học không được để trống';
+      if (!courseForm.description.trim()) errors.description = 'Mô tả không được để trống';
+      if (!courseForm.instructor.trim()) errors.instructor = 'Giảng viên không được để trống';
+      if (courseForm.maxStudents < courseForm.enrolledStudents) {
+        errors.maxStudents = 'Số sinh viên tối đa phải lớn hơn hoặc bằng số sinh viên đã đăng ký';
+      }
+      
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(prev => ({
+          ...prev,
+          courseForm: errors
+        }));
+        return;
+      }
+      
+      // Update course with form data
+      setCourse({
+        ...courseForm,
+        title: courseForm.title.trim(),
+        code: courseForm.code.trim(),
+        description: courseForm.description.trim(),
+        instructor: courseForm.instructor.trim()
+      });
+      setEditMode(null);
+      setFormErrors(prev => ({ ...prev, courseForm: {} }));
+      
+      // In a real app, we would make an API call here
+      console.log("Course saved:", courseForm);
+    } catch (error) {
+      console.error("Error saving course:", error);
+    }
   }
   
   // Format file size for display
   const formatFileSize = (size?: string): string => {
-    if (!size) return '0 B'
-    return size
+    if (!size) return '0 B';
+    return size;
   }
 
   // Format date for display
   const formatDate = (date?: Date): string => {
-    if (!date) return ''
-    return new Intl.DateTimeFormat('vi-VN').format(date)
+    if (!date) return '';
+    return new Intl.DateTimeFormat('vi-VN').format(date);
+  }
+
+  // Reset upload state
+  const resetUploadState = () => {
+    setUploadState({
+      file: null,
+      progress: 0,
+      error: null
+    });
   }
 
   return (
@@ -478,28 +770,46 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-6">
               <div className="space-y-2">
-                <Label htmlFor="course-title">Tên khóa học</Label>
+                <Label htmlFor="course-title">
+                  Tên khóa học <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="course-title"
                   value={courseForm.title}
                   onChange={(e) => setCourseForm({...courseForm, title: e.target.value})}
+                  className={formErrors.courseForm.title ? "border-red-500" : ""}
                 />
+                {formErrors.courseForm.title && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.courseForm.title}</p>
+                )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="course-code">Mã khóa học</Label>
+                <Label htmlFor="course-code">
+                  Mã khóa học <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="course-code"
                   value={courseForm.code}
                   onChange={(e) => setCourseForm({...courseForm, code: e.target.value})}
+                  className={formErrors.courseForm.code ? "border-red-500" : ""}
                 />
+                {formErrors.courseForm.code && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.courseForm.code}</p>
+                )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="course-instructor">Giảng viên</Label>
+                <Label htmlFor="course-instructor">
+                  Giảng viên <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="course-instructor"
                   value={courseForm.instructor}
                   onChange={(e) => setCourseForm({...courseForm, instructor: e.target.value})}
+                  className={formErrors.courseForm.instructor ? "border-red-500" : ""}
                 />
+                {formErrors.courseForm.instructor && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.courseForm.instructor}</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="course-status">Trạng thái</Label>
@@ -520,13 +830,19 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="course-description">Mô tả khóa học</Label>
+              <Label htmlFor="course-description">
+                Mô tả khóa học <span className="text-red-500">*</span>
+              </Label>
               <Textarea
                 id="course-description"
                 value={courseForm.description}
                 onChange={(e) => setCourseForm({...courseForm, description: e.target.value})}
                 rows={5}
+                className={formErrors.courseForm.description ? "border-red-500" : ""}
               />
+              {formErrors.courseForm.description && (
+                <p className="text-red-500 text-xs mt-1">{formErrors.courseForm.description}</p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-6">
@@ -554,7 +870,7 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
                   id="course-enrolled"
                   type="number"
                   value={courseForm.enrolledStudents}
-                  onChange={(e) => setCourseForm({...courseForm, enrolledStudents: parseInt(e.target.value)})}
+                  onChange={(e) => setCourseForm({...courseForm, enrolledStudents: parseInt(e.target.value) || 0})}
                   min={0}
                 />
               </div>
@@ -564,9 +880,13 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
                   id="course-max"
                   type="number"
                   value={courseForm.maxStudents}
-                  onChange={(e) => setCourseForm({...courseForm, maxStudents: parseInt(e.target.value)})}
+                  onChange={(e) => setCourseForm({...courseForm, maxStudents: parseInt(e.target.value) || 0})}
                   min={1}
+                  className={formErrors.courseForm.maxStudents ? "border-red-500" : ""}
                 />
+                {formErrors.courseForm.maxStudents && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.courseForm.maxStudents}</p>
+                )}
               </div>
             </div>
 
@@ -582,10 +902,36 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
                     />
                   )}
                 </div>
-                <Button variant="outline" className="flex items-center gap-2 bg-transparent">
-                  <Upload className="h-4 w-4" />
-                  Tải ảnh lên
-                </Button>
+                <div className="flex-1 space-y-2">
+                  <input
+                    type="file"
+                    id="thumbnail-upload"
+                    className="hidden"
+                    accept="image/jpeg,image/png,image/jpg"
+                    onChange={(e) => handleFileUpload(e, 'image')}
+                  />
+                  <Button 
+                    variant="outline" 
+                    className="flex items-center gap-2 bg-transparent"
+                    onClick={() => document.getElementById('thumbnail-upload')?.click()}
+                    disabled={uploadState.progress > 0 && uploadState.progress < 100}
+                  >
+                    {uploadState.progress > 0 && uploadState.progress < 100 ? (
+                      <>
+                        <RotateCw className="h-4 w-4 animate-spin" />
+                        Đang tải... {uploadState.progress}%
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4" />
+                        Tải ảnh lên
+                      </>
+                    )}
+                  </Button>
+                  {uploadState.error && (
+                    <p className="text-red-500 text-xs">{uploadState.error}</p>
+                  )}
+                </div>
               </div>
             </div>
           </CardContent>
@@ -636,17 +982,26 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
                           <span className="text-xs text-muted-foreground">({section.lectures.length} bài)</span>
                         </CardTitle>
                         <div className="flex items-center gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteSection(section.id);
-                            }}
-                            className="h-8 text-red-600 hover:text-red-700 bg-transparent border-red-200"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteSection(section.id);
+                                  }}
+                                  className="h-8 text-red-600 hover:text-red-700 bg-transparent border-red-200"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Xóa phần học</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                           <Button 
                             variant="outline" 
                             size="sm" 
@@ -695,24 +1050,42 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
                                   </div>
                                 </div>
                                 <div className="flex gap-1">
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
-                                    className="h-8 bg-transparent"
-                                    onClick={() => {
-                                      setCurrentLecture(lecture);
-                                    }}
-                                  >
-                                    <Edit className="h-3.5 w-3.5" />
-                                  </Button>
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
-                                    className="h-8 text-red-600 hover:text-red-700 bg-transparent"
-                                    onClick={() => handleDeleteLecture(lecture.id, section.id)}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </Button>
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button 
+                                          variant="outline" 
+                                          size="sm" 
+                                          className="h-8 bg-transparent"
+                                          onClick={() => {
+                                            setCurrentLecture(lecture);
+                                          }}
+                                        >
+                                          <Edit className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>Chỉnh sửa bài giảng</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button 
+                                          variant="outline" 
+                                          size="sm" 
+                                          className="h-8 text-red-600 hover:text-red-700 bg-transparent"
+                                          onClick={() => handleDeleteLecture(lecture.id, section.id)}
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>Xóa bài giảng</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
                                 </div>
                               </div>
                             </div>
@@ -805,24 +1178,42 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
                         </div>
                         
                         <div className="flex gap-1">
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="h-8 bg-transparent"
-                            onClick={() => {
-                              setCurrentAssignment(assignment);
-                            }}
-                          >
-                            <Edit className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="h-8 text-red-600 hover:text-red-700 bg-transparent"
-                            onClick={() => handleDeleteAssignment(assignment.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="h-8 bg-transparent"
+                                  onClick={() => {
+                                    setCurrentAssignment(assignment);
+                                  }}
+                                >
+                                  <Edit className="h-3.5 w-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Chỉnh sửa bài tập</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="h-8 text-red-600 hover:text-red-700 bg-transparent"
+                                  onClick={() => handleDeleteAssignment(assignment.id)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Xóa bài tập</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </div>
                       </div>
                     </CardContent>
@@ -991,231 +1382,4 @@ export function CourseEditor({ courseId }: { courseId?: string }) {
                     <CheckCircle2 className="h-5 w-5 text-orange-500" />
                     <p className="text-sm font-medium">Quiz</p>
                   </div>
-                  <p className="text-sm font-bold">{course.sections.reduce((acc, section) => 
-                    acc + section.lectures.filter(l => l.type === "quiz").length, 0
-                  )}</p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      )}
-
-      {/* Add Section Dialog */}
-      <Dialog open={showAddSectionDialog} onOpenChange={setShowAddSectionDialog}>
-        <DialogContent className="sm:max-w-[550px]">
-          <DialogHeader>
-            <DialogTitle>Thêm phần học mới</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="section-title">Tên phần học</Label>
-              <Input
-                id="section-title"
-                value={newSection.title}
-                onChange={(e) => setNewSection({...newSection, title: e.target.value})}
-                placeholder="Nhập tên phần học..."
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="section-description">Mô tả (tùy chọn)</Label>
-              <Textarea
-                id="section-description"
-                value={newSection.description}
-                onChange={(e) => setNewSection({...newSection, description: e.target.value})}
-                placeholder="Mô tả ngắn về phần học này..."
-                rows={3}
-              />
-            </div>
-          </div>
-          <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setShowAddSectionDialog(false)}>
-              Hủy
-            </Button>
-            <Button onClick={handleAddSection} disabled={!newSection.title}>
-              Thêm phần học
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Lecture Dialog */}
-      <Dialog open={showAddLectureDialog} onOpenChange={setShowAddLectureDialog}>
-        <DialogContent className="sm:max-w-[650px]">
-          <DialogHeader>
-            <DialogTitle>Thêm bài giảng mới</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="lecture-title">Tên bài giảng</Label>
-              <Input
-                id="lecture-title"
-                value={newLecture.title}
-                onChange={(e) => setNewLecture({...newLecture, title: e.target.value})}
-                placeholder="Nhập tên bài giảng..."
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lecture-description">Mô tả</Label>
-              <Textarea
-                id="lecture-description"
-                value={newLecture.description}
-                onChange={(e) => setNewLecture({...newLecture, description: e.target.value})}
-                placeholder="Mô tả ngắn về bài giảng này..."
-                rows={2}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lecture-type">Loại bài giảng</Label>
-              <Select 
-                value={newLecture.type} 
-                onValueChange={(value) => setNewLecture({...newLecture, type: value as "video" | "document" | "quiz"})}>
-                <SelectTrigger id="lecture-type">
-                  <SelectValue placeholder="Chọn loại bài giảng" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="video">Video bài giảng</SelectItem>
-                  <SelectItem value="document">Tài liệu</SelectItem>
-                  <SelectItem value="quiz">Quiz</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {newLecture.type === "video" && (
-              <>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="lecture-duration">Thời lượng (phút)</Label>
-                    <Input
-                      id="lecture-duration"
-                      type="number"
-                      value={newLecture.duration || ""}
-                      onChange={(e) => setNewLecture({...newLecture, duration: parseInt(e.target.value) || 0})}
-                      min={1}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="lecture-file">Tên file</Label>
-                    <Input
-                      id="lecture-file"
-                      value={newLecture.fileName || ""}
-                      onChange={(e) => setNewLecture({...newLecture, fileName: e.target.value})}
-                      placeholder="video.mp4"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Upload Video</Label>
-                  <Button variant="outline" className="w-full bg-transparent">
-                    <Upload className="h-4 w-4 mr-2" />
-                    Tải video lên
-                  </Button>
-                </div>
-              </>
-            )}
-
-            {newLecture.type === "document" && (
-              <div className="space-y-2">
-                <Label>Upload Tài liệu</Label>
-                <Button variant="outline" className="w-full bg-transparent">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Tải tài liệu lên
-                </Button>
-              </div>
-            )}
-
-            {newLecture.type === "quiz" && (
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">
-                  Quiz sẽ được tạo với các câu hỏi cơ bản. Bạn có thể chỉnh sửa chi tiết sau khi tạo.
-                </p>
-              </div>
-            )}
-          </div>
-          <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setShowAddLectureDialog(false)}>
-              Hủy
-            </Button>
-            <Button onClick={handleAddLecture} disabled={!newLecture.title}>
-              Thêm bài giảng
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Assignment Dialog */}
-      <Dialog open={showAddAssignmentDialog} onOpenChange={setShowAddAssignmentDialog}>
-        <DialogContent className="sm:max-w-[650px]">
-          <DialogHeader>
-            <DialogTitle>Thêm bài tập mới</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="assignment-title">Tên bài tập</Label>
-              <Input
-                id="assignment-title"
-                value={newAssignment.title}
-                onChange={(e) => setNewAssignment({...newAssignment, title: e.target.value})}
-                placeholder="Nhập tên bài tập..."
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="assignment-description">Mô tả và yêu cầu</Label>
-              <Textarea
-                id="assignment-description"
-                value={newAssignment.description}
-                onChange={(e) => setNewAssignment({...newAssignment, description: e.target.value})}
-                placeholder="Mô tả chi tiết về bài tập và các yêu cầu..."
-                rows={4}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="assignment-due-date">Hạn nộp bài</Label>
-                <Input
-                  id="assignment-due-date"
-                  type="date"
-                  value={newAssignment.dueDate ? newAssignment.dueDate.toISOString().split('T')[0] : ''}
-                  onChange={(e) => setNewAssignment({...newAssignment, dueDate: new Date(e.target.value)})}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="assignment-points">Điểm tối đa</Label>
-                <Input
-                  id="assignment-points"
-                  type="number"
-                  value={newAssignment.points || 100}
-                  onChange={(e) => setNewAssignment({...newAssignment, points: parseInt(e.target.value) || 100})}
-                  min={1}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="assignment-status">Trạng thái</Label>
-              <Select 
-                value={newAssignment.status as string} 
-                onValueChange={(value) => setNewAssignment({...newAssignment, status: value as "draft" | "published" | "archived"})}>
-                <SelectTrigger id="assignment-status">
-                  <SelectValue placeholder="Chọn trạng thái" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="draft">Bản nháp</SelectItem>
-                  <SelectItem value="published">Xuất bản</SelectItem>
-                  <SelectItem value="archived">Lưu trữ</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setShowAddAssignmentDialog(false)}>
-              Hủy
-            </Button>
-            <Button onClick={handleAddAssignment} disabled={!newAssignment.title}>
-              Thêm bài tập
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
-  )
-}
+                  <p className="

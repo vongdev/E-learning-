@@ -19,13 +19,14 @@ import {
   ChevronDown,
   LogOut,
   Settings,
-  User,
+  User as UserIcon,
   Bell,
   Shield,
+  LayoutDashboard,
 } from "lucide-react";
 
-export function UserHeader() {
-  const { user, logout, isLoading, isAdmin } = useAuth();
+export function AdminHeader() {
+  const { user, userName, userAvatarUrl, logout, isLoading, isAdmin } = useAuth();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
 
@@ -63,11 +64,14 @@ export function UserHeader() {
         variant="outline"
         className="gap-2"
       >
-        <User className="h-4 w-4" />
+        <UserIcon className="h-4 w-4" />
         <span>Đăng nhập</span>
       </Button>
     );
   }
+
+  // Sử dụng userName từ context
+  const displayName = userName || "Admin";
 
   return (
     <div className="flex items-center gap-3">
@@ -83,13 +87,13 @@ export function UserHeader() {
             className="flex items-center gap-2 px-2 hover:bg-slate-100"
           >
             <Avatar className="h-8 w-8 border border-slate-200">
-              <AvatarImage src={user.avatarUrl} alt={user.name} />
+              <AvatarImage src={userAvatarUrl || undefined} alt={displayName} />
               <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
-                {getInitials(user.name)}
+                {getInitials(displayName)}
               </AvatarFallback>
             </Avatar>
             <span className="text-sm font-medium text-slate-700">
-              {user.name.split(" ")[0]}
+              {displayName.split(" ")[0]}
             </span>
             <ChevronDown className="h-4 w-4 text-slate-500" />
           </Button>
@@ -97,16 +101,23 @@ export function UserHeader() {
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuLabel>
             <div className="flex flex-col space-y-1">
-              <p className="text-sm font-medium">{user.name}</p>
+              <p className="text-sm font-medium">{displayName}</p>
               <p className="text-xs text-slate-500 truncate">{user.email}</p>
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="cursor-pointer"
+            onClick={() => router.push("/admin/dashboard")}
+          >
+            <LayoutDashboard className="mr-2 h-4 w-4" />
+            <span>Dashboard</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="cursor-pointer"
             onClick={() => router.push("/profile")}
           >
-            <User className="mr-2 h-4 w-4" />
+            <UserIcon className="mr-2 h-4 w-4" />
             <span>Thông tin cá nhân</span>
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -114,17 +125,8 @@ export function UserHeader() {
             onClick={() => router.push("/")}
           >
             <BookOpen className="mr-2 h-4 w-4" />
-            <span>Khóa học của tôi</span>
+            <span>Xem trang chính</span>
           </DropdownMenuItem>
-          {isAdmin && (
-            <DropdownMenuItem
-              className="cursor-pointer"
-              onClick={() => router.push("/admin/dashboard")}
-            >
-              <Shield className="mr-2 h-4 w-4" />
-              <span>Quản trị hệ thống</span>
-            </DropdownMenuItem>
-          )}
           <DropdownMenuItem
             className="cursor-pointer"
             onClick={() => router.push("/settings")}

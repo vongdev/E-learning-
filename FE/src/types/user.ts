@@ -177,3 +177,24 @@ export interface UserNotification {
     url: string
   }>
 }
+
+// Helper functions để thay thế getter methods
+export const getUserName = (user: User): string => {
+  return user.profile.displayName || `${user.profile.firstName} ${user.profile.lastName}`.trim();
+};
+
+export const isUserAdmin = (user: User): boolean => {
+  return user.roles.includes('admin');
+};
+
+export const isUserStudent = (user: User): boolean => {
+  return user.roles.includes('student');
+};
+
+export const isUserInstructor = (user: User): boolean => {
+  return user.roles.includes('instructor');
+};
+
+export const getUserAvatarUrl = (user: User): string => {
+  return user.profile.avatar || '';
+};
